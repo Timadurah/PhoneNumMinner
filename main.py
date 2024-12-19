@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 import os
 import shutil
 import uvicorn
+from pydantic import BaseModel
 
 app = FastAPI()
 
@@ -19,6 +20,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Ensure there's a folder for generated files (change path as needed)
+GENERATED_FILES_PATH = "generated_files"
+if not os.path.exists(GENERATED_FILES_PATH):
+    os.makedirs(GENERATED_FILES_PATH)
 
 # Function to generate a random phone number with a given country code
 def generate_phone_number(country_code: str, prefix: str):
@@ -59,13 +65,11 @@ def generate_phone_numbers(country_code: str, prefix: str, amount: int):
 def save_to_csv(file_path: str, numbers: List[dict]):
     with open(file_path, mode="w", newline="") as file:
         writer = csv.writer(file)
-        writer.writerow(["Phone Number"])
+        writer.writerow(["Phone Number", "Carrier"])
         for item in numbers:
-            writer.writerow([item["phone_number"]])
+            writer.writerow([item["phone_number"], item["carrier"]])
 
 # Endpoint to generate phone numbers and provide a download link for the CSV
-from pydantic import BaseModel
-
 class PhoneNumberRequest(BaseModel):
     country_code: str
     prefix: str
@@ -81,7 +85,10 @@ async def generate_and_download(request: PhoneNumberRequest, background_tasks: B
         raise HTTPException(status_code=400, detail="Amount must be greater than 0")
     
     valid_numbers = generate_phone_numbers(request.country_code, request.prefix, request.amount)
-    file_path = "generated_phone_numbers.csv"
+    
+    # Ensure the file is saved in the correct directory
+    file_path = os.path.join(GENERATED_FILES_PATH, "generated_phone_numbers.csv")
+    
     background_tasks.add_task(save_to_csv, file_path, valid_numbers)
     
     download_link = f"/download-csv?file_path={file_path}"
@@ -90,12 +97,11 @@ async def generate_and_download(request: PhoneNumberRequest, background_tasks: B
 # Endpoint to download the CSV file
 @app.get("/download-csv")
 async def download_csv(file_path: str):
+    # Check if the file exists before attempting to serve it
     if os.path.exists(file_path):
         return FileResponse(file_path, media_type='text/csv', filename='phone_numbers.csv')
     else:
         raise HTTPException(status_code=404, detail="File not found")
-
-
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
